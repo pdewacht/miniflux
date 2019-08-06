@@ -15,13 +15,31 @@ const maxParsingError = 3
 // NewBatch returns a serie of jobs.
 func (s *Storage) NewBatch(batchSize int) (jobs model.JobList, err error) {
 	query := `
+		WITH t AS (
+		  SELECT
+		  feed_id,
+		  CASE
+		    WHEN current_timestamp - max(published_at) < interval '9 days'
+		      THEN interval '0 hours'
+		    WHEN current_timestamp - max(published_at) < interval '22 days'
+		      THEN interval '6 hours'
+		    ELSE
+		      interval '24 hours'
+		  END
+		  AS minimum_interval
+		  FROM entries
+		  GROUP BY feed_id
+		)
 		SELECT
 			id,
 			user_id
 		FROM
 			feeds
+		JOIN
+			t ON feeds.id = t.feed_id
 		WHERE
 			parsing_error_count < $1 AND disabled is false
+			AND checked_at + minimum_interval <= current_timestamp
 		ORDER BY checked_at ASC LIMIT %d
 	`
 	return s.fetchBatchRows(fmt.Sprintf(query, batchSize), maxParsingError)
